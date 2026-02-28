@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>CineView Pro - 寻子遗迹</title>
+    <style>
+        :root { --accent: #FFD700; --bar-h: 60px; --bottom-h: 100px; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; flex-direction: column; font-family: -apple-system, sans-serif; }
+        
+        /* 顶部状态栏 */
+        .top-bar { height: var(--bar-h); width: 100%; background: #000; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 100; font-size: 10px; color: #777; border-bottom: 1px solid #222; padding-top: env(safe-area-inset-top); }
+        
+        /* 4:3 锁定取景区域 */
+        #viewport-container { flex: 1; position: relative; width: 100%; display: flex; align-items: center; justify-content: center; background: #050505; }
+        #viewfinder { position: relative; aspect-ratio: 4 / 3; height: 92%; max-width: 100%; background: #000; overflow: hidden; box-shadow: 0 0 30px rgba(0,0,0,1); }
+        
+        video { position: absolute; width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        
+        /* 底部交互栏 */
+        .bottom-bar { height: var(--bottom-h); width: 100%; background: #000; display: grid; grid-template-columns: 80px 1fr 80px; align-items: center; padding: 0 15px; box-sizing: border-box; border-top: 1px solid #222; padding-bottom: env(safe-area-inset-bottom); }
+        .focal-list { display: flex; justify-content: center; gap: 15px; font-weight: bold; font-size: 13px; color: #444; }
+        .focal-list span.active { color: var(--accent); }
+        
+        .ctrl-btn { height: 45px; border-radius: 8px; background: #1a1a1a; border: 1px solid #333; color: #fff; font-size: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; }
+        .rec-btn { background: #b00; border: none; font-size: 12px; }
+        .rec-btn:active { background: #f00; transform: scale(0.95); }
+
+        /* 启动遮罩 */
+        #mask { position: fixed; inset: 0; background: #000; z-index: 999; display: flex; align-items: center; justify-content: center; color: var(--accent); text-align: center; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="mask" onclick="init()">
+    <div>
+        <h2 style="letter-spacing: 2px;">CINEVIEW PRO</h2>
+        <p style="font-size: 12px; color: #666;">点击开启《寻子遗迹》勘景模式 (4:3)</p>
+    </div>
+</div>
+
+<div class="top-bar">
+    <div>PROJ: 寻子遗迹</div>
+    <div id="device-tag">IPHONE 16 PRO</div>
+    <div>WUHAN, CHINA</div>
+</div>
+
+<div id="viewport-container">
+    <div id="viewfinder">
+        <video id="v" autoplay playsinline muted></video>
+        <canvas id="c"></canvas>
+    </div>
+</div>
+
+<div class="bottom-bar">
+    <div class="ctrl-btn" onclick="switchCam()">CAM<br><span id="cam-label">16P</span></div>
+    <div class="focal-list">
+        <span class="active">24</span><span>35</span><span>48</span><span id="tele-label">120</span><span>135</span>
+    </div>
+    <div class="ctrl-btn rec-btn" onclick="takeSnapshot()">REC</div>
+</div>
+
+<script>
+    const state = {
+        idx: 1,
+        devs: [
+            {n:'15P', t:77, fullName: 'IPHONE 15 PRO'}, 
+            {n:'16P', t:120, fullName: 'IPHONE 16 PRO'}, 
+            {n:'17P', t:100, fullName: 'IPHONE 17 PRO'}
+        ]
+    };
+
+    const v = document.getElementById('v');
+    const c = document.getElementById('c');
+    const ctx = c.getContext('2d');
+
+    async function init() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: {ideal: 1920}, height: {ideal: 1080} }
+            });
+            v.srcObject = stream;
+            document.getElementById('mask').style.opacity = '0';
+            setTimeout(() => document.getElementById('mask').style.display = 'none', 500);
+            v.onloadedmetadata = sync;
+        } catch (e) { alert("请允许摄像头权限以运行勘景程序"); }
+    }
+
+    function sync() {
+        const r = document.getElementById('viewfinder').getBoundingClientRect();
+        c.width = r.width;
+        c.height = r.height;
+        render();
+    }
+
+    function render(isCapture = false, targetCtx = ctx, w = c.width, h = c.height) {
+        if (!isCapture) targetCtx.clearRect(0, 0, w, h);
+        const cx = w / 2;
+        const cy = h / 2;
+        const tele = state.devs[state.idx].t;
+
+        [24, 35, 48, tele, 135].forEach(f => {
+            const ratio = 24 / f;
+            const fw = w * ratio;
+            const fh = h * ratio;
+
+            targetCtx.strokeStyle = (f === 24) ? "rgba(255, 215, 0, 0.9)" : "rgba(255,255,255,0.5)";
+            targetCtx.setLineDash(f > 50 ? [w/80, w/80] : []);
+            targetCtx.lineWidth = w / 500;
+            targetCtx.strokeRect(cx - fw/2, cy - fh/2, fw, fh);
+            
+            targetCtx.fillStyle = "white";
+            targetCtx.font = `${w/45}px sans-serif`;
+            targetCtx.fillText(f + "mm", cx - fw/2 + 5, cy - fh/2 + w/35);
+        });
+        if (!isCapture) requestAnimationFrame(() => render());
+    }
+
+    function getCenterCropRect(srcW, srcH, aspect) {
+        if (srcW / srcH > aspect) {
+            const sw = srcH * aspect;
+            return { sx: (srcW - sw) / 2, sy: 0, sw, sh: srcH };
+        }
+        const sh = srcW / aspect;
+        return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh };
+    }
+
+    function drawVideoToLandscapeCanvas(videoEl) {
+        const vw = videoEl.videoWidth;
+        const vh = videoEl.videoHeight;
+        if (vw >= vh) return null;
+
+        const tmp = document.createElement('canvas');
+        tmp.width = vh;
+        tmp.height = vw;
+        const tmpCtx = tmp.getContext('2d');
+        tmpCtx.translate(tmp.width / 2, tmp.height / 2);
+        tmpCtx.rotate(-Math.PI / 2);
+        tmpCtx.drawImage(videoEl, -vw / 2, -vh / 2, vw, vh);
+        return tmp;
+    }
+
+    function takeSnapshot() {
+        const vw = v.videoWidth;
+        const vh = v.videoHeight;
+        if (!vw || !vh) return;
+
+        const aspect = 4 / 3;
+        const rotated = drawVideoToLandscapeCanvas(v);
+        const source = rotated || v;
+        const srcW = rotated ? rotated.width : vw;
+        const srcH = rotated ? rotated.height : vh;
+        const { sx, sy, sw, sh } = getCenterCropRect(srcW, srcH, aspect);
+
+        const out = document.createElement('canvas');
+        const outCtx = out.getContext('2d');
+        out.width = Math.round(sw);
+        out.height = Math.round(sh);
+        outCtx.drawImage(source, sx, sy, sw, sh, 0, 0, out.width, out.height);
+
+        render(true, outCtx, out.width, out.height);
+
+        // 烧录元数据水印
+        const wmH = Math.max(56, Math.round(out.height * 0.09));
+        const wmPadX = Math.max(20, Math.round(out.width * 0.02));
+        const wmFont = Math.max(18, Math.round(out.width * 0.022));
+        outCtx.fillStyle = "rgba(0,0,0,0.6)";
+        outCtx.fillRect(0, out.height - wmH, out.width, wmH);
+        outCtx.fillStyle = "white";
+        outCtx.font = `${wmFont}px monospace`;
+        outCtx.fillText(`PROJ: XUNZI YIJI | ${state.devs[state.idx].fullName} | ${new Date().toLocaleString()}`, wmPadX, out.height - Math.round(wmH * 0.35));
+
+        const link = document.createElement('a');
+        link.download = `Scout_${Date.now()}.jpg`;
+        link.href = out.toDataURL('image/jpeg', 0.95);
+        link.click();
+
+        // 快门视觉反馈
+        document.body.style.filter = "brightness(2)";
+        setTimeout(() => document.body.style.filter = "brightness(1)", 100);
+    }
+
+    function switchCam() {
+        state.idx = (state.idx + 1) % state.devs.length;
+        document.getElementById('cam-label').innerText = state.devs[state.idx].n;
+        document.getElementById('tele-label').innerText = state.devs[state.idx].t;
+        document.getElementById('device-tag').innerText = state.devs[state.idx].fullName;
+    }
+
+    window.onresize = sync;
+    window.addEventListener('orientationchange', () => setTimeout(sync, 500));
+</script>
+</body>
+</html>
